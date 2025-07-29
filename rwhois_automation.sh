@@ -332,103 +332,64 @@ configure_rwhois() {
         # Copy sample configurations to active config directory
         cp -r "$RWHOIS_HOME/etc/rwhoisd/samples"/* "$RWHOIS_CONFIG/"
         
-        # Create the hosts.allow file that the config references
-        cat > "$RWHOIS_DATA/hosts.allow" << EOF
-# RWHOIS Access Control - Allow all by default
-127.0.0.1/32
-0.0.0.0/0
+        # Use the sample config file directly, but update the root-dir path
+        sed -i "s|root-dir:.*|root-dir: $RWHOIS_DATA|g" "$RWHOIS_CONFIG/rwhoisd.conf"
+        sed -i "s|userid:.*|userid: $RWHOIS_USER|g" "$RWHOIS_CONFIG/rwhoisd.conf"
+        sed -i "s|pid-file:.*|pid-file: $RWHOIS_HOME/rwhoisd.pid|g" "$RWHOIS_CONFIG/rwhoisd.conf"
+        
+        # Create the missing rwhoisd.x.dir file
+        cat > "$RWHOIS_CONFIG/rwhoisd.x.dir" << EOF
+# Extended directory configuration
+type: directory
+directive: xfer
+name: example.com
 EOF
 
-        # Create the hosts.deny file
-        cat > "$RWHOIS_DATA/hosts.deny" << EOF
-# RWHOIS Deny List
-# Add IP addresses or networks to deny access here
-EOF
-
-        # Update the main config file with our settings
-        cat > "$RWHOIS_CONFIG/rwhoisd.conf" << EOF
-# RWHOIS Server Configuration - Based on sample
-userid: $RWHOIS_USER
-server-contact: admin@example.com
-pid-file: $RWHOIS_HOME/rwhoisd.pid
-root-dir: $RWHOIS_DATA
-hosts-allow: $RWHOIS_DATA/hosts.allow
-hosts-deny: $RWHOIS_DATA/hosts.deny
-EOF
-
-        # Create the required auth_area file
-        cat > "$RWHOIS_DATA/rwhoisd.auth_area" << EOF
-authority-area: example.com
-hostmaster: admin@example.com
-serial-no: 1
-refresh: 3600
-increment: 1800
-retry: 604800
-ttl: 86400
-primary-server: localhost:$RWHOIS_PORT
-EOF
-
-        # Create the directory file
-        cat > "$RWHOIS_DATA/rwhoisd.dir" << EOF
-type: master
-data-dir: $RWHOIS_DATA
-schema-version: 1.5
-EOF
-
-        # Create rwhoisd.root file
-        cat > "$RWHOIS_DATA/rwhoisd.root" << EOF
-SOA: example.com admin@example.com 1 3600 1800 604800 86400
-authority-area: example.com
-default-ttl: 86400
-EOF
+        # Copy the sample files to the data directory as well since they reference files there
+        if [ -f "$RWHOIS_CONFIG/rwhoisd.auth_area" ]; then
+            cp "$RWHOIS_CONFIG/rwhoisd.auth_area" "$RWHOIS_DATA/"
+        fi
+        if [ -f "$RWHOIS_CONFIG/rwhoisd.dir" ]; then
+            cp "$RWHOIS_CONFIG/rwhoisd.dir" "$RWHOIS_DATA/"
+        fi
+        if [ -f "$RWHOIS_CONFIG/rwhoisd.root" ]; then
+            cp "$RWHOIS_CONFIG/rwhoisd.root" "$RWHOIS_DATA/"
+        fi
+        if [ -f "$RWHOIS_CONFIG/rwhoisd.allow" ]; then
+            cp "$RWHOIS_CONFIG/rwhoisd.allow" "$RWHOIS_DATA/hosts.allow"
+        fi
+        if [ -f "$RWHOIS_CONFIG/rwhoisd.deny" ]; then
+            cp "$RWHOIS_CONFIG/rwhoisd.deny" "$RWHOIS_DATA/hosts.deny"
+        fi
 
     else
-        log "Sample files not found, creating basic configuration..."
+        log "Sample files not found, creating minimal configuration..."
         
-        # Create basic configuration file
+        # Create minimal working configuration
         cat > "$RWHOIS_CONFIG/rwhoisd.conf" << EOF
-# RWHOIS Server Configuration
+# Minimal RWHOIS Server Configuration
 userid: $RWHOIS_USER
 server-contact: admin@example.com
 pid-file: $RWHOIS_HOME/rwhoisd.pid
 root-dir: $RWHOIS_DATA
 EOF
-
-        # Create required files
+        
+        # Create minimal required files
         cat > "$RWHOIS_DATA/rwhoisd.auth_area" << EOF
 authority-area: example.com
 hostmaster: admin@example.com
-serial-no: 1
-refresh: 3600
-increment: 1800
-retry: 604800
-ttl: 86400
-primary-server: localhost:$RWHOIS_PORT
 EOF
         
-        # Create access control files
-        cat > "$RWHOIS_DATA/hosts.allow" << EOF
+        cat > "$RWHOIS_DATA/rwhoisd.dir" << EOF
+# Directory configuration
+EOF
+        
+        cat > "$RWHOIS_CONFIG/rwhoisd.allow" << EOF
 127.0.0.1/32
 0.0.0.0/0
-EOF
-
-        cat > "$RWHOIS_DATA/hosts.deny" << EOF
-# Deny list - add IPs to block here
 EOF
     fi
     
-    # Create access control files in config directory as well (backup)
-    cat > "$RWHOIS_CONFIG/rwhoisd.allow" << EOF
-# RWHOIS Access Control - Allow all by default
-127.0.0.1/32
-0.0.0.0/0
-EOF
-
-    cat > "$RWHOIS_CONFIG/rwhoisd.deny" << EOF
-# RWHOIS Deny List
-# Add IP addresses or networks to deny access
-EOF
-
     # Create schema files for our data types
     create_schema_files
     
