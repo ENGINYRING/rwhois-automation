@@ -54,6 +54,7 @@ A comprehensive bash script that fully automates the installation, configuration
 - Minimum 512MB RAM
 - 100MB available disk space
 - Internet connection for downloading RWHOIS source
+- **Service Management:** Supports systemd, traditional init scripts, or manual management
 
 ### **Dependencies** 
 The script automatically installs these dependencies:
@@ -81,10 +82,16 @@ sudo ./rwhois_automation.sh install
 The script performs all installation steps automatically. For troubleshooting, you can run individual service management commands after installation:
 
 ```bash
-# Download and run full installation
+# Download and run full installation (includes automatic cleanup)
 wget -O rwhois_automation.sh https://raw.githubusercontent.com/ENGINYRING/rwhois-automation/main/rwhois_automation.sh
 chmod +x rwhois_automation.sh
 sudo ./rwhois_automation.sh install
+
+# For clean reinstallation (if needed)
+sudo ./rwhois_automation.sh reinstall
+
+# Clean up existing installation only
+sudo ./rwhois_automation.sh cleanup
 
 # After installation, manage the service:
 sudo ./rwhois_automation.sh start
@@ -298,8 +305,14 @@ After installation, the following directory structure is created:
 
 ### **Verify Installation**
 ```bash
-# Check if RWHOIS service is running
+# Check if RWHOIS service is running (systemd)
 systemctl status rwhois
+
+# Check if RWHOIS service is running (init script)
+/etc/init.d/rwhois status
+
+# Check if RWHOIS process is running (manual)
+ps aux | grep rwhoisd
 
 # Test RWHOIS queries
 telnet localhost 4321
@@ -328,6 +341,22 @@ Once connected via telnet:
 
 ### **Common Issues**
 
+#### Installation Issues or Corruption
+```bash
+# Clean reinstallation (preserves data)
+sudo ./rwhois_automation.sh reinstall
+
+# Complete cleanup without reinstalling  
+sudo ./rwhois_automation.sh cleanup
+
+# Manual cleanup if script fails
+sudo pkill -f rwhoisd
+sudo rm -f /etc/init.d/rwhois
+sudo rm -f /etc/systemd/system/rwhois.service
+sudo systemctl daemon-reload
+sudo update-rc.d rwhois remove
+```
+
 #### Installation Fails
 ```bash
 # Check if running as root
@@ -342,12 +371,23 @@ df -h /usr/local
 
 #### Service Won't Start
 ```bash
-# Check configuration syntax
+# Check service status (systemd)
+systemctl status rwhois
+systemctl restart rwhois
+
+# Check service status (init script)
+/etc/init.d/rwhois status
+/etc/init.d/rwhois restart
+
+# Manual troubleshooting
 ./rwhois_automation.sh stop
 ./rwhois_automation.sh start
 
-# View service logs
+# View service logs (systemd)
 journalctl -u rwhois -f
+
+# View process status
+ps aux | grep rwhoisd
 
 # Check port availability
 netstat -tlnp | grep 4321
@@ -366,9 +406,10 @@ head /usr/local/rwhois/data/org/*.txt
 ```
 
 ### **Log Locations**
-- Service logs: `journalctl -u rwhois`
-- Application logs: `/var/log/rwhois/`
-- Installation logs: Script outputs to console
+- **Systemd logs:** `journalctl -u rwhois` (if systemd is available)
+- **Application logs:** `/var/log/rwhois/`
+- **Installation logs:** Script outputs to console
+- **Process logs:** Check with `ps aux | grep rwhoisd`
 
 ## 🤝 Contributing
 
