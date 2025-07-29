@@ -63,6 +63,7 @@ The script automatically installs these dependencies:
 - Flex and Bison parsers
 - OpenSSL development libraries
 - Zlib compression library
+- Netcat for connectivity testing
 
 ## 🛠️ Installation
 
@@ -82,7 +83,7 @@ sudo ./rwhois_automation.sh install
 The script performs all installation steps automatically. For troubleshooting, you can run individual service management commands after installation:
 
 ```bash
-# Download and run full installation (includes automatic cleanup)
+# Download and run full installation (includes automatic cleanup and validation)
 wget -O rwhois_automation.sh https://raw.githubusercontent.com/ENGINYRING/rwhois-automation/main/rwhois_automation.sh
 chmod +x rwhois_automation.sh
 sudo ./rwhois_automation.sh install
@@ -92,6 +93,9 @@ sudo ./rwhois_automation.sh reinstall
 
 # Clean up existing installation only
 sudo ./rwhois_automation.sh cleanup
+
+# Validate existing installation
+sudo ./rwhois_automation.sh validate
 
 # After installation, manage the service:
 sudo ./rwhois_automation.sh start
@@ -305,6 +309,9 @@ After installation, the following directory structure is created:
 
 ### **Verify Installation**
 ```bash
+# Validate the installation automatically
+sudo ./rwhois_automation.sh validate
+
 # Check if RWHOIS service is running (systemd)
 systemctl status rwhois
 
@@ -314,9 +321,24 @@ systemctl status rwhois
 # Check if RWHOIS process is running (manual)
 ps aux | grep rwhoisd
 
-# Test RWHOIS queries
+# Test RWHOIS queries with sample data
 telnet localhost 4321
+
+# Example queries (after connecting):
+-status                         # Check server status and object count
+-search org-name Sample         # Search for sample organization
+-search contact john            # Search for sample contact
+-search network 203.0.113.0     # Search for sample network
+-quit                          # Disconnect
 ```
+
+### **Sample Data**
+The installation script automatically creates sample data for immediate testing:
+- **Sample Organization**: SAMPLE-ORG (Sample Organization)
+- **Sample Contact**: SAMPLE-CONTACT (John Sample)  
+- **Sample Network**: SAMPLE-NET (203.0.113.0/24)
+
+This ensures your RWHOIS server has queryable data immediately after installation.
 
 ### **Query Examples**
 Once connected via telnet:
