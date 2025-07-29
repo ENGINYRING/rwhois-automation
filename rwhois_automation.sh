@@ -376,6 +376,10 @@ EOF
 create_schema_files_in_samples() {
     local samples_dir="$1"
     
+    # Create directories first
+    mkdir -p "$samples_dir"/{org,contact,network}
+    mkdir -p "$samples_dir/network"/{ipv4,ipv6,asn}
+    
     # Create organization schema
     cat > "$samples_dir/org/schema" << EOF
 name:           Organization Name:      TEXT:20:M:
@@ -419,9 +423,8 @@ created:        Created Date:           TEXT:10:O:
 updated:        Updated Date:           TEXT:10:O:
 EOF
 
-    # Create directories if they don't exist
-    mkdir -p "$samples_dir"/{org,contact,network}
-    mkdir -p "$samples_dir/network"/{ipv4,ipv6,asn}
+    # Set proper ownership
+    chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$samples_dir"/{org,contact,network}
 }
 
 # Create schema files
