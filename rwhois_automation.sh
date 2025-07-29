@@ -325,47 +325,36 @@ install_rwhois() {
 configure_rwhois() {
     log "Configuring RWHOIS..."
     
-    # Use the sample configuration files as a base
+    # Use the sample configuration files as they are designed to work
     if [ -d "$RWHOIS_HOME/etc/rwhoisd/samples" ]; then
-        log "Using sample configuration files as base..."
+        log "Using sample configuration as primary data directory..."
         
-        # Copy sample configurations to active config directory
-        cp -r "$RWHOIS_HOME/etc/rwhoisd/samples"/* "$RWHOIS_CONFIG/"
+        # The samples directory IS the data directory in this setup
+        SAMPLES_DIR="$RWHOIS_HOME/etc/rwhoisd/samples"
         
-        # Use the sample config file directly, but update the root-dir path
-        sed -i "s|root-dir:.*|root-dir: $RWHOIS_DATA|g" "$RWHOIS_CONFIG/rwhoisd.conf"
+        # Copy the sample config to the main config location
+        cp "$SAMPLES_DIR/rwhoisd.conf" "$RWHOIS_CONFIG/rwhoisd.conf"
+        
+        # Update only the userid in the main config
         sed -i "s|userid:.*|userid: $RWHOIS_USER|g" "$RWHOIS_CONFIG/rwhoisd.conf"
-        sed -i "s|pid-file:.*|pid-file: $RWHOIS_HOME/rwhoisd.pid|g" "$RWHOIS_CONFIG/rwhoisd.conf"
+        sed -i "s|server-contact:.*|server-contact: admin@example.com|g" "$RWHOIS_CONFIG/rwhoisd.conf"
         
-        # Create the missing rwhoisd.x.dir file
-        cat > "$RWHOIS_CONFIG/rwhoisd.x.dir" << EOF
-# Extended directory configuration
-type: directory
-directive: xfer
-name: example.com
-EOF
-
-        # Copy the sample files to the data directory as well since they reference files there
-        if [ -f "$RWHOIS_CONFIG/rwhoisd.auth_area" ]; then
-            cp "$RWHOIS_CONFIG/rwhoisd.auth_area" "$RWHOIS_DATA/"
+        # Add PID file setting if not present
+        if ! grep -q "pid-file:" "$RWHOIS_CONFIG/rwhoisd.conf"; then
+            echo "pid-file: $RWHOIS_HOME/rwhoisd.pid" >> "$RWHOIS_CONFIG/rwhoisd.conf"
         fi
-        if [ -f "$RWHOIS_CONFIG/rwhoisd.dir" ]; then
-            cp "$RWHOIS_CONFIG/rwhoisd.dir" "$RWHOIS_DATA/"
-        fi
-        if [ -f "$RWHOIS_CONFIG/rwhoisd.root" ]; then
-            cp "$RWHOIS_CONFIG/rwhoisd.root" "$RWHOIS_DATA/"
-        fi
-        if [ -f "$RWHOIS_CONFIG/rwhoisd.allow" ]; then
-            cp "$RWHOIS_CONFIG/rwhoisd.allow" "$RWHOIS_DATA/hosts.allow"
-        fi
-        if [ -f "$RWHOIS_CONFIG/rwhoisd.deny" ]; then
-            cp "$RWHOIS_CONFIG/rwhoisd.deny" "$RWHOIS_DATA/hosts.deny"
-        fi
-
+        
+        # Create our schema files in the samples directory (which is the active data directory)
+        create_schema_files_in_samples "$SAMPLES_DIR"
+        
+        # Update the global RWHOIS_DATA variable to point to samples directory
+        RWHOIS_DATA="$SAMPLES_DIR"
+        
     else
         log "Sample files not found, creating minimal configuration..."
         
-        # Create minimal working configuration
+        # Fallback to basic configuration
+        mkdir -p "$RWHOIS_DATA"
         cat > "$RWHOIS_CONFIG/rwhoisd.conf" << EOF
 # Minimal RWHOIS Server Configuration
 userid: $RWHOIS_USER
@@ -373,31 +362,66 @@ server-contact: admin@example.com
 pid-file: $RWHOIS_HOME/rwhoisd.pid
 root-dir: $RWHOIS_DATA
 EOF
-        
-        # Create minimal required files
-        cat > "$RWHOIS_DATA/rwhoisd.auth_area" << EOF
-authority-area: example.com
-hostmaster: admin@example.com
-EOF
-        
-        cat > "$RWHOIS_DATA/rwhoisd.dir" << EOF
-# Directory configuration
-EOF
-        
-        cat > "$RWHOIS_CONFIG/rwhoisd.allow" << EOF
-127.0.0.1/32
-0.0.0.0/0
-EOF
+        create_schema_files
     fi
-    
-    # Create schema files for our data types
-    create_schema_files
     
     # Set permissions
     chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_CONFIG"
-    chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_DATA"
+    chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_HOME/etc/rwhoisd"
     
     log "RWHOIS configuration completed"
+}
+
+# Create schema files in samples directory
+create_schema_files_in_samples() {
+    local samples_dir="$1"
+    
+    # Create organization schema
+    cat > "$samples_dir/org/schema" << EOF
+name:           Organization Name:      TEXT:20:M:
+org-name:       Organization Name:      TEXT:80:M:
+street-address: Street Address:        TEXT:255:O:
+city:           City:                   TEXT:80:O:
+state:          State/Province:         TEXT:80:O:
+postal-code:    Postal Code:            TEXT:20:O:
+country-code:   Country Code:           TEXT:2:O:
+phone:          Phone Number:           TEXT:40:O:
+fax:            Fax Number:             TEXT:40:O:
+e-mail:         Email Address:          TEXT:80:O:
+EOF
+
+    # Create contact schema  
+    cat > "$samples_dir/contact/schema" << EOF
+name:           Contact Name:           TEXT:20:M:
+first-name:     First Name:             TEXT:40:O:
+middle-name:    Middle Name:            TEXT:40:O:
+last-name:      Last Name:              TEXT:40:M:
+organization:   Organization:           TEXT:80:O:
+street-address: Street Address:         TEXT:255:O:
+city:           City:                   TEXT:80:O:
+state:          State/Province:         TEXT:80:O:
+postal-code:    Postal Code:            TEXT:20:O:
+country-code:   Country Code:           TEXT:2:O:
+phone:          Phone Number:           TEXT:40:O:
+fax:            Fax Number:             TEXT:40:O:
+e-mail:         Email Address:          TEXT:80:M:
+EOF
+
+    # Create network schema
+    cat > "$samples_dir/network/schema" << EOF
+name:           Network Name:           TEXT:20:M:
+network:        Network Address:        TEXT:80:M:
+net-name:       Network Name:           TEXT:80:O:
+org-name:       Organization:           TEXT:80:O:
+tech-contact:   Technical Contact:      TEXT:80:O:
+admin-contact:  Administrative Contact: TEXT:80:O:
+created:        Created Date:           TEXT:10:O:
+updated:        Updated Date:           TEXT:10:O:
+EOF
+
+    # Create directories if they don't exist
+    mkdir -p "$samples_dir"/{org,contact,network}
+    mkdir -p "$samples_dir/network"/{ipv4,ipv6,asn}
 }
 
 # Create schema files
@@ -446,6 +470,15 @@ updated:        Updated Date:           TEXT:10:O:
 EOF
 }
 
+# Get the active data directory
+get_data_directory() {
+    if [ -d "$RWHOIS_HOME/etc/rwhoisd/samples" ]; then
+        echo "$RWHOIS_HOME/etc/rwhoisd/samples"
+    else
+        echo "$RWHOIS_DATA"
+    fi
+}
+
 # Organization management functions
 add_organization() {
     local org_name="$1"
@@ -460,7 +493,11 @@ add_organization() {
     
     log "Adding organization: $org_name"
     
-    local org_file="$RWHOIS_DATA/org/$org_name.txt"
+    local active_data_dir=$(get_data_directory)
+    local org_file="$active_data_dir/org/$org_name.txt"
+    
+    # Ensure directory exists
+    mkdir -p "$active_data_dir/org"
     
     cat > "$org_file" << EOF
 name: $org_name
@@ -483,7 +520,8 @@ update_organization() {
     local field="$2"
     local value="$3"
     
-    local org_file="$RWHOIS_DATA/org/$org_name.txt"
+    local active_data_dir=$(get_data_directory)
+    local org_file="$active_data_dir/org/$org_name.txt"
     
     if [[ ! -f "$org_file" ]]; then
         error "Organization $org_name not found"
@@ -500,7 +538,8 @@ update_organization() {
 
 delete_organization() {
     local org_name="$1"
-    local org_file="$RWHOIS_DATA/org/$org_name.txt"
+    local active_data_dir=$(get_data_directory)
+    local org_file="$active_data_dir/org/$org_name.txt"
     
     if [[ ! -f "$org_file" ]]; then
         error "Organization $org_name not found"
@@ -594,7 +633,8 @@ add_network() {
     
     log "Adding network resource: $net_name ($resource_type)"
     
-    local net_dir="$RWHOIS_DATA/network"
+    local active_data_dir=$(get_data_directory)
+    local net_dir="$active_data_dir/network"
     local net_file="$net_dir/$net_name.txt"
     
     # Create subdirectory for resource type if needed
@@ -634,12 +674,13 @@ update_network() {
     local value="$3"
     local resource_type="$4"
     
+    local active_data_dir=$(get_data_directory)
     local net_file
     case "$resource_type" in
-        "ipv4") net_file="$RWHOIS_DATA/network/ipv4/$net_name.txt" ;;
-        "ipv6") net_file="$RWHOIS_DATA/network/ipv6/$net_name.txt" ;;
-        "asn") net_file="$RWHOIS_DATA/network/asn/$net_name.txt" ;;
-        *) net_file="$RWHOIS_DATA/network/$net_name.txt" ;;
+        "ipv4") net_file="$active_data_dir/network/ipv4/$net_name.txt" ;;
+        "ipv6") net_file="$active_data_dir/network/ipv6/$net_name.txt" ;;
+        "asn") net_file="$active_data_dir/network/asn/$net_name.txt" ;;
+        *) net_file="$active_data_dir/network/$net_name.txt" ;;
     esac
     
     if [[ ! -f "$net_file" ]]; then
@@ -660,12 +701,13 @@ delete_network() {
     local net_name="$1"
     local resource_type="$2"
     
+    local active_data_dir=$(get_data_directory)
     local net_file
     case "$resource_type" in
-        "ipv4") net_file="$RWHOIS_DATA/network/ipv4/$net_name.txt" ;;
-        "ipv6") net_file="$RWHOIS_DATA/network/ipv6/$net_name.txt" ;;
-        "asn") net_file="$RWHOIS_DATA/network/asn/$net_name.txt" ;;
-        *) net_file="$RWHOIS_DATA/network/$net_name.txt" ;;
+        "ipv4") net_file="$active_data_dir/network/ipv4/$net_name.txt" ;;
+        "ipv6") net_file="$active_data_dir/network/ipv6/$net_name.txt" ;;
+        "asn") net_file="$active_data_dir/network/asn/$net_name.txt" ;;
+        *) net_file="$active_data_dir/network/$net_name.txt" ;;
     esac
     
     if [[ ! -f "$net_file" ]]; then
@@ -682,19 +724,26 @@ delete_network() {
 rebuild_indexes() {
     log "Rebuilding RWHOIS indexes..."
     
-    cd "$RWHOIS_DATA"
+    # Check if we're using samples directory
+    if [ -d "$RWHOIS_HOME/etc/rwhoisd/samples" ]; then
+        ACTIVE_DATA_DIR="$RWHOIS_HOME/etc/rwhoisd/samples"
+    else
+        ACTIVE_DATA_DIR="$RWHOIS_DATA"
+    fi
+    
+    cd "$ACTIVE_DATA_DIR"
     
     # Build indexes for each data type
     for dir in org contact network network/ipv4 network/ipv6 network/asn; do
         if [[ -d "$dir" ]]; then
             log "Building index for $dir"
-            cd "$RWHOIS_DATA/$dir"
+            cd "$ACTIVE_DATA_DIR/$dir"
             "$RWHOIS_BIN/rwhois_indexer" -c schema *.txt 2>/dev/null || true
-            cd "$RWHOIS_DATA"
+            cd "$ACTIVE_DATA_DIR"
         fi
     done
     
-    chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_DATA"
+    chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$ACTIVE_DATA_DIR"
     log "Indexes rebuilt successfully"
 }
 
