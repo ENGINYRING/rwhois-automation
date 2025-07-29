@@ -67,9 +67,8 @@ The script automatically installs these dependencies:
 
 ### **Quick Start**
 ```bash
-# Clone the repository
-git clone https://github.com/ENGINYRING/rwhois-automation.git
-cd rwhois-automation
+# Download the script
+wget -O rwhois_automation.sh https://raw.githubusercontent.com/ENGINYRING/rwhois-automation/main/rwhois_automation.sh
 
 # Make the script executable
 chmod +x rwhois_automation.sh
@@ -79,23 +78,19 @@ sudo ./rwhois_automation.sh install
 ```
 
 ### **Manual Installation Steps**
-If you prefer to run individual steps:
+The script performs all installation steps automatically. For troubleshooting, you can run individual service management commands after installation:
 
 ```bash
-# Install dependencies only
-sudo ./rwhois_automation.sh install-deps
+# Download and run full installation
+wget -O rwhois_automation.sh https://raw.githubusercontent.com/ENGINYRING/rwhois-automation/main/rwhois_automation.sh
+chmod +x rwhois_automation.sh
+sudo ./rwhois_automation.sh install
 
-# Setup user and directories
-sudo ./rwhois_automation.sh setup-dirs
-
-# Install RWHOIS server
-sudo ./rwhois_automation.sh install-rwhois
-
-# Configure server
-sudo ./rwhois_automation.sh configure
-
-# Start server
+# After installation, manage the service:
 sudo ./rwhois_automation.sh start
+sudo ./rwhois_automation.sh stop
+sudo ./rwhois_automation.sh restart
+sudo ./rwhois_automation.sh rebuild-indexes
 ```
 
 ## 📖 Usage
@@ -376,12 +371,13 @@ We welcome contributions! Please follow these guidelines:
 
 ### **How to Contribute**
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests if applicable
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+2. Clone your fork: `git clone https://github.com/YOUR-USERNAME/rwhois-automation.git`
+3. Create a feature branch (`git checkout -b feature/amazing-feature`)
+4. Make your changes
+5. Add tests if applicable
+6. Commit your changes (`git commit -m 'Add amazing feature'`)
+7. Push to the branch (`git push origin feature/amazing-feature`)
+8. Open a Pull Request
 
 ### **Code Style**
 - Follow existing bash scripting conventions
