@@ -110,7 +110,30 @@ install_rwhois() {
         "https://ftp.arin.net/rwhoisd/rwhoisd-${RWHOIS_VERSION}.tar.gz"
     
     tar -xzf rwhois-${RWHOIS_VERSION}.tar.gz
-    cd rwhoisd-${RWHOIS_VERSION} || cd rwhois-${RWHOIS_VERSION}
+    
+    # GitHub archives create directory named repo-tag, try both possibilities
+    if [[ -d "rwhoisd-${RWHOIS_VERSION}" ]]; then
+        cd "rwhoisd-${RWHOIS_VERSION}"
+    elif [[ -d "rwhois-${RWHOIS_VERSION}" ]]; then
+        cd "rwhois-${RWHOIS_VERSION}"
+    else
+        # List directories to see what was actually created
+        echo "Available directories:"
+        ls -la
+        error "Could not find extracted directory"
+        exit 1
+    fi
+    
+    # Generate configure script if it doesn't exist
+    if [[ ! -f "configure" ]]; then
+        log "Generating configure script..."
+        if [[ -f "configure.ac" ]] || [[ -f "configure.in" ]]; then
+            autoreconf -fiv
+        else
+            error "No configure script or autotools files found"
+            exit 1
+        fi
+    fi
     
     # Configure and compile
     ./configure --prefix="$RWHOIS_HOME"
