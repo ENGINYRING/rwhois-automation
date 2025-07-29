@@ -124,25 +124,62 @@ install_rwhois() {
         exit 1
     fi
     
-    # Generate configure script if it doesn't exist
-    if [[ ! -f "configure" ]]; then
-        log "Generating configure script..."
-        if [[ -f "configure.ac" ]] || [[ -f "configure.in" ]]; then
-            autoreconf -fiv
-        else
-            error "No configure script or autotools files found"
+    log "Current directory contents:"
+    ls -la
+    
+    # Check what build system is available
+    if [[ -f "configure" ]]; then
+        log "Found existing configure script"
+    elif [[ -f "configure.ac" ]] || [[ -f "configure.in" ]]; then
+        log "Generating configure script with autoreconf..."
+        autoreconf -fiv
+    elif [[ -f "Makefile" ]]; then
+        log "Found Makefile, attempting direct make..."
+        make PREFIX="$RWHOIS_HOME"
+        make install PREFIX="$RWHOIS_HOME"
+        
+        # Copy binaries if they exist
+        if [[ -f "rwhoisd" ]]; then
+            cp rwhoisd "$RWHOIS_BIN/"
+        fi
+        if [[ -f "tools/rwhois_indexer" ]]; then
+            cp tools/rwhois_indexer "$RWHOIS_BIN/"
+        elif [[ -f "rwhois_indexer" ]]; then
+            cp rwhois_indexer "$RWHOIS_BIN/"
+        fi
+        
+        chmod +x "$RWHOIS_BIN"/*
+        cd /
+        rm -rf /tmp/rwhois*
+        log "RWHOIS installed successfully"
+        return 0
+    elif [[ -f "Makefile.in" ]]; then
+        log "Found Makefile.in, trying autoconf..."
+        autoconf
+        if [[ ! -f "configure" ]]; then
+            error "Failed to generate configure script"
             exit 1
         fi
+    else
+        log "Available files:"
+        find . -name "*.ac" -o -name "*.in" -o -name "Makefile*" -o -name "configure*" | head -20
+        error "No recognized build system found"
+        exit 1
     fi
     
-    # Configure and compile
-    ./configure --prefix="$RWHOIS_HOME"
-    make
-    make install
-    
-    # Copy binaries
-    cp tools/rwhois_indexer "$RWHOIS_BIN/"
-    chmod +x "$RWHOIS_BIN"/*
+    # Configure and compile (if we have a configure script)
+    if [[ -f "configure" ]]; then
+        log "Running configure and make..."
+        ./configure --prefix="$RWHOIS_HOME"
+        make
+        make install
+        
+        # Copy additional tools
+        if [[ -f "tools/rwhois_indexer" ]]; then
+            cp tools/rwhois_indexer "$RWHOIS_BIN/"
+        fi
+        chmod +x "$RWHOIS_BIN"/*
+    fi
     
     # Clean up
     cd /
