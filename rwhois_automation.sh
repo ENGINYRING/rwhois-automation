@@ -332,6 +332,19 @@ configure_rwhois() {
         # Copy sample configurations to active config directory
         cp -r "$RWHOIS_HOME/etc/rwhoisd/samples"/* "$RWHOIS_CONFIG/"
         
+        # Create the hosts.allow file that the config references
+        cat > "$RWHOIS_DATA/hosts.allow" << EOF
+# RWHOIS Access Control - Allow all by default
+127.0.0.1/32
+0.0.0.0/0
+EOF
+
+        # Create the hosts.deny file
+        cat > "$RWHOIS_DATA/hosts.deny" << EOF
+# RWHOIS Deny List
+# Add IP addresses or networks to deny access here
+EOF
+
         # Update the main config file with our settings
         cat > "$RWHOIS_CONFIG/rwhoisd.conf" << EOF
 # RWHOIS Server Configuration - Based on sample
@@ -339,6 +352,8 @@ userid: $RWHOIS_USER
 server-contact: admin@example.com
 pid-file: $RWHOIS_HOME/rwhoisd.pid
 root-dir: $RWHOIS_DATA
+hosts-allow: $RWHOIS_DATA/hosts.allow
+hosts-deny: $RWHOIS_DATA/hosts.deny
 EOF
 
         # Create the required auth_area file
@@ -390,9 +405,19 @@ retry: 604800
 ttl: 86400
 primary-server: localhost:$RWHOIS_PORT
 EOF
+        
+        # Create access control files
+        cat > "$RWHOIS_DATA/hosts.allow" << EOF
+127.0.0.1/32
+0.0.0.0/0
+EOF
+
+        cat > "$RWHOIS_DATA/hosts.deny" << EOF
+# Deny list - add IPs to block here
+EOF
     fi
     
-    # Create access control files
+    # Create access control files in config directory as well (backup)
     cat > "$RWHOIS_CONFIG/rwhoisd.allow" << EOF
 # RWHOIS Access Control - Allow all by default
 127.0.0.1/32
