@@ -1034,29 +1034,51 @@ start() {
         return 1
     fi
     
-    if [ -f $PID_FILE ] && kill -0 $(cat $PID_FILE) 2>/dev/null; then
+    # Better process detection - check if already running
+    if pgrep -f "rwhoisd.*$CONFIG_FILE" > /dev/null; then
         echo 'RWHOIS server already running' >&2
         return 1
     fi
+    
     echo 'Starting RWHOIS server...'
+    cd "$ROOT_DIR"
     su - $USER -s /bin/bash -c "$DAEMON_PATH -c $CONFIG_FILE -d" && echo 'RWHOIS server started'
     [ -d "$LOCK_DIR" ] && touch $LOCK_FILE
 }
 
 stop() {
-    if [ ! -f "$PID_FILE" ] || ! kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+    # Use process detection instead of PID file
+    local pids=$(pgrep -f "rwhoisd.*$CONFIG_FILE" 2>/dev/null || true)
+    
+    if [ -z "$pids" ]; then
         echo 'RWHOIS server not running' >&2
         return 1
     fi
+    
     echo 'Stopping RWHOIS server...'
-    kill $(cat $PID_FILE) && rm -f $PID_FILE
-    rm -f $LOCK_FILE
+    echo "$pids" | xargs -r kill && echo 'RWHOIS server stopped'
+    
+    # Wait a moment and force kill if needed
+    sleep 2
+    pids=$(pgrep -f "rwhoisd.*$CONFIG_FILE" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo 'Force stopping RWHOIS server...'
+        echo "$pids" | xargs -r kill -9
+    fi
+    
+    rm -f $PID_FILE $LOCK_FILE
     echo 'RWHOIS server stopped'
 }
 
 status() {
-    if [ -f $PID_FILE ] && kill -0 $(cat $PID_FILE) 2>/dev/null; then
-        echo "RWHOIS server is running (PID: $(cat $PID_FILE))"
+    local pids=$(pgrep -f "rwhoisd.*$CONFIG_FILE" 2>/dev/null || true)
+    
+    if [ -n "$pids" ]; then
+        echo "RWHOIS server is running (PID: $pids)"
+        # Also check if listening on port
+        if netstat -tlnp 2>/dev/null | grep -q ":4321 "; then
+            echo "RWHOIS server is listening on port 4321"
+        fi
         return 0
     else
         echo "RWHOIS server is not running"
