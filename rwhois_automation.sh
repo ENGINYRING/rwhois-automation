@@ -543,93 +543,120 @@ rebuild_indexes() {
 start_rwhois() {
     log "Starting RWHOIS server..."
     
-    # Check if systemd is available
-    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
-        if systemctl is-active --quiet rwhois; then
+    # Enhanced systemd detection
+    if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+        if systemctl is-active --quiet rwhois 2>/dev/null; then
             warning "RWHOIS server is already running"
             return 0
         fi
-        systemctl start rwhois
-        if systemctl is-active --quiet rwhois; then
+        if systemctl start rwhois 2>/dev/null; then
             log "RWHOIS server started successfully (systemd)"
-        else
-            error "Failed to start RWHOIS server via systemd"
-            return 1
-        fi
-    elif [ -f /etc/init.d/rwhois ]; then
-        /etc/init.d/rwhois start
-    else
-        # Manual start
-        if pgrep -f rwhoisd > /dev/null; then
-            warning "RWHOIS server is already running"
             return 0
-        fi
-        
-        su - "$RWHOIS_USER" -s /bin/bash -c \
-            "$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -f $RWHOIS_DATA" &
-        
-        sleep 2
-        
-        if pgrep -f rwhoisd > /dev/null; then
-            log "RWHOIS server started successfully (manual)"
         else
-            error "Failed to start RWHOIS server"
-            return 1
+            warning "Systemd start failed, trying manual start..."
         fi
+    fi
+    
+    # Try init script
+    if [ -f /etc/init.d/rwhois ]; then
+        /etc/init.d/rwhois start
+        return $?
+    fi
+    
+    # Manual start
+    if pgrep -f rwhoisd > /dev/null; then
+        warning "RWHOIS server is already running"
+        return 0
+    fi
+    
+    su - "$RWHOIS_USER" -s /bin/bash -c \
+        "$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -f $RWHOIS_DATA" &
+    
+    sleep 2
+    
+    if pgrep -f rwhoisd > /dev/null; then
+        log "RWHOIS server started successfully (manual)"
+    else
+        error "Failed to start RWHOIS server"
+        return 1
     fi
 }
 
 stop_rwhois() {
     log "Stopping RWHOIS server..."
     
-    # Check if systemd is available
-    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
-        if ! systemctl is-active --quiet rwhois; then
-            warning "RWHOIS server is not running"
-            return 0
+    # Enhanced systemd detection
+    if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+        if ! systemctl is-active --quiet rwhois 2>/dev/null; then
+            warning "RWHOIS server is not running (systemd)"
+        else
+            if systemctl stop rwhois 2>/dev/null; then
+                log "RWHOIS server stopped (systemd)"
+                return 0
+            else
+                warning "Systemd stop failed, trying manual stop..."
+            fi
         fi
-        systemctl stop rwhois
-        log "RWHOIS server stopped (systemd)"
-    elif [ -f /etc/init.d/rwhois ]; then
-        /etc/init.d/rwhois stop
-    else
-        # Manual stop
-        if ! pgrep -f rwhoisd > /dev/null; then
-            warning "RWHOIS server is not running"
-            return 0
-        fi
-        
-        pkill -f rwhoisd
-        sleep 2
-        
-        if pgrep -f rwhoisd > /dev/null; then
-            warning "Force killing RWHOIS server..."
-            pkill -9 -f rwhoisd
-        fi
-        
-        log "RWHOIS server stopped (manual)"
     fi
+    
+    # Try init script
+    if [ -f /etc/init.d/rwhois ]; then
+        /etc/init.d/rwhois stop
+        return $?
+    fi
+    
+    # Manual stop
+    if ! pgrep -f rwhoisd > /dev/null; then
+        warning "RWHOIS server is not running"
+        return 0
+    fi
+    
+    pkill -f rwhoisd
+    sleep 2
+    
+    if pgrep -f rwhoisd > /dev/null; then
+        warning "Force killing RWHOIS server..."
+        pkill -9 -f rwhoisd
+    fi
+    
+    log "RWHOIS server stopped (manual)"
 }
 
 restart_rwhois() {
-    # Check if systemd is available
-    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
-        systemctl restart rwhois
-        log "RWHOIS server restarted (systemd)"
-    elif [ -f /etc/init.d/rwhois ]; then
-        /etc/init.d/rwhois restart
-    else
-        stop_rwhois
-        sleep 1
-        start_rwhois
+    # Enhanced systemd detection
+    if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+        if systemctl restart rwhois 2>/dev/null; then
+            log "RWHOIS server restarted (systemd)"
+            return 0
+        else
+            warning "Systemd restart failed, trying manual restart..."
+        fi
     fi
+    
+    # Try init script
+    if [ -f /etc/init.d/rwhois ]; then
+        /etc/init.d/rwhois restart
+        return $?
+    fi
+    
+    # Manual restart
+    stop_rwhois
+    sleep 1
+    start_rwhois
 }
 
 # Create systemd service file
 create_systemd_service() {
-    # Check if systemd is available
-    if ! command -v systemctl &> /dev/null || ! systemctl --version &> /dev/null 2>&1; then
-        warning "Systemd not available, creating traditional init script instead..."
+    # Enhanced systemd detection
+    if [ ! -d /run/systemd/system ] || ! pidof systemd &> /dev/null; then
+        warning "Systemd not running or not available, creating traditional init script instead..."
+        create_init_script
+        return 0
+    fi
+    
+    # Additional check for systemctl functionality
+    if ! systemctl --version &> /dev/null 2>&1; then
+        warning "Systemctl not functional, creating traditional init script instead..."
         create_init_script
         return 0
     fi
@@ -655,10 +682,12 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
     
-    systemctl daemon-reload
-    systemctl enable rwhois
-    
-    log "Systemd service created and enabled"
+    if systemctl daemon-reload &> /dev/null && systemctl enable rwhois &> /dev/null; then
+        log "Systemd service created and enabled"
+    else
+        warning "Systemd service creation failed, falling back to init script..."
+        create_init_script
+    fi
 }
 
 # Create traditional init script for non-systemd systems
@@ -812,7 +841,7 @@ main() {
             
             # Show service management information
             info "Service Management:"
-            if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+            if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
                 info "  - Start: systemctl start rwhois OR ./rwhois_automation.sh start"
                 info "  - Stop:  systemctl stop rwhois OR ./rwhois_automation.sh stop"
                 info "  - Status: systemctl status rwhois"
