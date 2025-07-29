@@ -543,51 +543,97 @@ rebuild_indexes() {
 start_rwhois() {
     log "Starting RWHOIS server..."
     
-    if pgrep -f rwhoisd > /dev/null; then
-        warning "RWHOIS server is already running"
-        return 0
-    fi
-    
-    su - "$RWHOIS_USER" -s /bin/bash -c \
-        "$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -f $RWHOIS_DATA" &
-    
-    sleep 2
-    
-    if pgrep -f rwhoisd > /dev/null; then
-        log "RWHOIS server started successfully"
+    # Check if systemd is available
+    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+        if systemctl is-active --quiet rwhois; then
+            warning "RWHOIS server is already running"
+            return 0
+        fi
+        systemctl start rwhois
+        if systemctl is-active --quiet rwhois; then
+            log "RWHOIS server started successfully (systemd)"
+        else
+            error "Failed to start RWHOIS server via systemd"
+            return 1
+        fi
+    elif [ -f /etc/init.d/rwhois ]; then
+        /etc/init.d/rwhois start
     else
-        error "Failed to start RWHOIS server"
-        return 1
+        # Manual start
+        if pgrep -f rwhoisd > /dev/null; then
+            warning "RWHOIS server is already running"
+            return 0
+        fi
+        
+        su - "$RWHOIS_USER" -s /bin/bash -c \
+            "$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -f $RWHOIS_DATA" &
+        
+        sleep 2
+        
+        if pgrep -f rwhoisd > /dev/null; then
+            log "RWHOIS server started successfully (manual)"
+        else
+            error "Failed to start RWHOIS server"
+            return 1
+        fi
     fi
 }
 
 stop_rwhois() {
     log "Stopping RWHOIS server..."
     
-    if ! pgrep -f rwhoisd > /dev/null; then
-        warning "RWHOIS server is not running"
-        return 0
+    # Check if systemd is available
+    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+        if ! systemctl is-active --quiet rwhois; then
+            warning "RWHOIS server is not running"
+            return 0
+        fi
+        systemctl stop rwhois
+        log "RWHOIS server stopped (systemd)"
+    elif [ -f /etc/init.d/rwhois ]; then
+        /etc/init.d/rwhois stop
+    else
+        # Manual stop
+        if ! pgrep -f rwhoisd > /dev/null; then
+            warning "RWHOIS server is not running"
+            return 0
+        fi
+        
+        pkill -f rwhoisd
+        sleep 2
+        
+        if pgrep -f rwhoisd > /dev/null; then
+            warning "Force killing RWHOIS server..."
+            pkill -9 -f rwhoisd
+        fi
+        
+        log "RWHOIS server stopped (manual)"
     fi
-    
-    pkill -f rwhoisd
-    sleep 2
-    
-    if pgrep -f rwhoisd > /dev/null; then
-        warning "Force killing RWHOIS server..."
-        pkill -9 -f rwhoisd
-    fi
-    
-    log "RWHOIS server stopped"
 }
 
 restart_rwhois() {
-    stop_rwhois
-    sleep 1
-    start_rwhois
+    # Check if systemd is available
+    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+        systemctl restart rwhois
+        log "RWHOIS server restarted (systemd)"
+    elif [ -f /etc/init.d/rwhois ]; then
+        /etc/init.d/rwhois restart
+    else
+        stop_rwhois
+        sleep 1
+        start_rwhois
+    fi
 }
 
 # Create systemd service file
 create_systemd_service() {
+    # Check if systemd is available
+    if ! command -v systemctl &> /dev/null || ! systemctl --version &> /dev/null 2>&1; then
+        warning "Systemd not available, creating traditional init script instead..."
+        create_init_script
+        return 0
+    fi
+    
     log "Creating systemd service..."
     
     cat > /etc/systemd/system/rwhois.service << EOF
@@ -613,6 +659,99 @@ EOF
     systemctl enable rwhois
     
     log "Systemd service created and enabled"
+}
+
+# Create traditional init script for non-systemd systems
+create_init_script() {
+    log "Creating traditional init script..."
+    
+    cat > /etc/init.d/rwhois << 'EOF'
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          rwhois
+# Required-Start:    $network $local_fs $remote_fs
+# Required-Stop:     $network $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: RWHOIS Server
+# Description:       RWHOIS (Referral Whois) Server Daemon
+### END INIT INFO
+
+DAEMON="rwhoisd"
+ROOT_DIR="/usr/local/rwhois"
+DAEMON_PATH="$ROOT_DIR/bin/$DAEMON"
+CONFIG_FILE="$ROOT_DIR/etc/rwhoisd.conf"
+DATA_DIR="$ROOT_DIR/data"
+PID_FILE="$ROOT_DIR/rwhoisd.pid"
+USER="rwhois"
+LOCK_FILE="/var/lock/subsys/rwhois"
+
+start() {
+    if [ -f $PID_FILE ] && kill -0 $(cat $PID_FILE) 2>/dev/null; then
+        echo 'RWHOIS server already running' >&2
+        return 1
+    fi
+    echo 'Starting RWHOIS server...'
+    su - $USER -s /bin/bash -c "$DAEMON_PATH -c $CONFIG_FILE -f $DATA_DIR" && echo 'RWHOIS server started'
+    touch $LOCK_FILE
+}
+
+stop() {
+    if [ ! -f "$PID_FILE" ] || ! kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        echo 'RWHOIS server not running' >&2
+        return 1
+    fi
+    echo 'Stopping RWHOIS server...'
+    kill $(cat $PID_FILE) && rm -f $PID_FILE
+    rm -f $LOCK_FILE
+    echo 'RWHOIS server stopped'
+}
+
+status() {
+    if [ -f $PID_FILE ] && kill -0 $(cat $PID_FILE) 2>/dev/null; then
+        echo "RWHOIS server is running (PID: $(cat $PID_FILE))"
+        return 0
+    else
+        echo "RWHOIS server is not running"
+        return 1
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart}"
+        exit 1
+esac
+
+exit $?
+EOF
+    
+    chmod +x /etc/init.d/rwhois
+    
+    # Try to enable the service if update-rc.d or chkconfig is available
+    if command -v update-rc.d &> /dev/null; then
+        update-rc.d rwhois defaults
+        log "Init script installed and enabled with update-rc.d"
+    elif command -v chkconfig &> /dev/null; then
+        chkconfig --add rwhois
+        chkconfig rwhois on
+        log "Init script installed and enabled with chkconfig"
+    else
+        log "Init script created at /etc/init.d/rwhois (manual enabling required)"
+    fi
 }
 
 # Display help information
@@ -670,6 +809,23 @@ main() {
             rebuild_indexes
             start_rwhois
             log "RWHOIS installation completed successfully!"
+            
+            # Show service management information
+            info "Service Management:"
+            if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+                info "  - Start: systemctl start rwhois OR ./rwhois_automation.sh start"
+                info "  - Stop:  systemctl stop rwhois OR ./rwhois_automation.sh stop"
+                info "  - Status: systemctl status rwhois"
+            elif [ -f /etc/init.d/rwhois ]; then
+                info "  - Start: /etc/init.d/rwhois start OR ./rwhois_automation.sh start"
+                info "  - Stop:  /etc/init.d/rwhois stop OR ./rwhois_automation.sh stop"
+                info "  - Status: /etc/init.d/rwhois status"
+            else
+                info "  - Start: ./rwhois_automation.sh start"
+                info "  - Stop:  ./rwhois_automation.sh stop"
+                info "  - Restart: ./rwhois_automation.sh restart"
+            fi
+            info "  - Test: telnet localhost 4321"
             ;;
         "start")
             check_root
