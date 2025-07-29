@@ -617,7 +617,7 @@ start_rwhois() {
     fi
     
     su - "$RWHOIS_USER" -s /bin/bash -c \
-        "$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -f $RWHOIS_DATA" &
+        "$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -d" &
     
     sleep 2
     
@@ -719,7 +719,7 @@ After=network.target
 Type=forking
 User=$RWHOIS_USER
 Group=$RWHOIS_GROUP
-ExecStart=$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -f $RWHOIS_DATA
+ExecStart=$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -d
 ExecReload=/bin/kill -HUP \$MAINPID
 PIDFile=$RWHOIS_HOME/rwhoisd.pid
 Restart=always
@@ -757,7 +757,6 @@ DAEMON="rwhoisd"
 ROOT_DIR="/usr/local/rwhois"
 DAEMON_PATH="$ROOT_DIR/bin/$DAEMON"
 CONFIG_FILE="$ROOT_DIR/etc/rwhoisd.conf"
-DATA_DIR="$ROOT_DIR/data"
 PID_FILE="$ROOT_DIR/rwhoisd.pid"
 USER="rwhois"
 
@@ -780,7 +779,7 @@ start() {
         return 1
     fi
     echo 'Starting RWHOIS server...'
-    su - $USER -s /bin/bash -c "$DAEMON_PATH -c $CONFIG_FILE -f $DATA_DIR" && echo 'RWHOIS server started'
+    su - $USER -s /bin/bash -c "$DAEMON_PATH -c $CONFIG_FILE -d" && echo 'RWHOIS server started'
     [ -d "$LOCK_DIR" ] && touch $LOCK_FILE
 }
 
