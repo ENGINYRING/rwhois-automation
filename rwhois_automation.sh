@@ -143,6 +143,15 @@ install_rwhois() {
         make
         make install
         
+        # Find and copy the main rwhoisd binary
+        if [[ -f "server/rwhoisd" ]]; then
+            cp server/rwhoisd "$RWHOIS_BIN/"
+            log "Copied rwhoisd binary from server/ directory"
+        elif [[ -f "rwhoisd" ]]; then
+            cp rwhoisd "$RWHOIS_BIN/"
+            log "Copied rwhoisd binary from current directory"
+        fi
+        
         # Copy additional tools
         if [[ -f "tools/rwhois_indexer/rwhois_indexer" ]]; then
             cp tools/rwhois_indexer/rwhois_indexer "$RWHOIS_BIN/"
@@ -159,6 +168,15 @@ install_rwhois() {
         make
         make install
         
+        # Find and copy the main rwhoisd binary
+        if [[ -f "server/rwhoisd" ]]; then
+            cp server/rwhoisd "$RWHOIS_BIN/"
+            log "Copied rwhoisd binary from server/ directory"
+        elif [[ -f "rwhoisd" ]]; then
+            cp rwhoisd "$RWHOIS_BIN/"
+            log "Copied rwhoisd binary from current directory"  
+        fi
+        
         # Copy additional tools
         if [[ -f "tools/rwhois_indexer/rwhois_indexer" ]]; then
             cp tools/rwhois_indexer/rwhois_indexer "$RWHOIS_BIN/"
@@ -172,8 +190,10 @@ install_rwhois() {
         make PREFIX="$RWHOIS_HOME"
         make install PREFIX="$RWHOIS_HOME"
         
-        # Copy binaries if they exist
-        if [[ -f "rwhoisd" ]]; then
+        # Find and copy binaries
+        if [[ -f "server/rwhoisd" ]]; then
+            cp server/rwhoisd "$RWHOIS_BIN/"
+        elif [[ -f "rwhoisd" ]]; then
             cp rwhoisd "$RWHOIS_BIN/"
         fi
         if [[ -f "tools/rwhois_indexer/rwhois_indexer" ]]; then
@@ -190,6 +210,27 @@ install_rwhois() {
         error "No recognized build system found"
         exit 1
     fi
+    
+    # Verify that rwhoisd binary exists
+    if [[ ! -f "$RWHOIS_BIN/rwhoisd" ]]; then
+        log "rwhoisd binary not found in $RWHOIS_BIN, searching for it..."
+        
+        # Search for rwhoisd binary in build directory
+        rwhoisd_locations=$(find . -name "rwhoisd" -type f -executable 2>/dev/null)
+        if [[ -n "$rwhoisd_locations" ]]; then
+            rwhoisd_binary=$(echo "$rwhoisd_locations" | head -n1)
+            log "Found rwhoisd at: $rwhoisd_binary"
+            cp "$rwhoisd_binary" "$RWHOIS_BIN/"
+            chmod +x "$RWHOIS_BIN/rwhoisd"
+            log "Copied rwhoisd binary to $RWHOIS_BIN/"
+        else
+            error "Could not find rwhoisd binary anywhere in build directory"
+            exit 1
+        fi
+    fi
+    
+    log "Binary verification:"
+    ls -la "$RWHOIS_BIN/"
     
     # Clean up
     cd /
@@ -543,6 +584,12 @@ rebuild_indexes() {
 start_rwhois() {
     log "Starting RWHOIS server..."
     
+    # Verify binary exists
+    if [[ ! -f "$RWHOIS_BIN/rwhoisd" ]]; then
+        error "RWHOIS binary not found at $RWHOIS_BIN/rwhoisd"
+        return 1
+    fi
+    
     # Enhanced systemd detection
     if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
         if systemctl is-active --quiet rwhois 2>/dev/null; then
@@ -713,16 +760,28 @@ CONFIG_FILE="$ROOT_DIR/etc/rwhoisd.conf"
 DATA_DIR="$ROOT_DIR/data"
 PID_FILE="$ROOT_DIR/rwhoisd.pid"
 USER="rwhois"
-LOCK_FILE="/var/lock/subsys/rwhois"
+
+# Create lock directory if it doesn't exist
+LOCK_DIR="/var/lock/subsys"
+if [ ! -d "$LOCK_DIR" ]; then
+    LOCK_DIR="/var/lock"
+fi
+LOCK_FILE="$LOCK_DIR/rwhois"
 
 start() {
+    # Check if binary exists
+    if [ ! -f "$DAEMON_PATH" ]; then
+        echo "Error: RWHOIS binary not found at $DAEMON_PATH" >&2
+        return 1
+    fi
+    
     if [ -f $PID_FILE ] && kill -0 $(cat $PID_FILE) 2>/dev/null; then
         echo 'RWHOIS server already running' >&2
         return 1
     fi
     echo 'Starting RWHOIS server...'
     su - $USER -s /bin/bash -c "$DAEMON_PATH -c $CONFIG_FILE -f $DATA_DIR" && echo 'RWHOIS server started'
-    touch $LOCK_FILE
+    [ -d "$LOCK_DIR" ] && touch $LOCK_FILE
 }
 
 stop() {
