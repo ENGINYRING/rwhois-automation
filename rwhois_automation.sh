@@ -134,12 +134,12 @@ install_dependencies() {
         yum update -y
         yum groupinstall -y "Development Tools"
         yum install -y gcc gcc-c++ make autoconf automake libtool \
-                      flex bison openssl-devel zlib-devel wget curl
+                      flex bison openssl-devel zlib-devel wget curl netcat
     elif [[ -f /etc/debian_version ]]; then
         # Debian/Ubuntu
         apt-get update
         apt-get install -y build-essential gcc g++ make autoconf automake libtool \
-                          flex bison libssl-dev zlib1g-dev wget curl
+                          flex bison libssl-dev zlib1g-dev wget curl netcat-openbsd
     else
         error "Unsupported operating system"
         exit 1
@@ -152,10 +152,14 @@ install_dependencies() {
 setup_user_dirs() {
     log "Setting up RWHOIS user and directories..."
     
-    # Create user if it doesn't exist
+    # Create user with proper home directory and shell
     if ! id "$RWHOIS_USER" &>/dev/null; then
-        useradd -r -d "$RWHOIS_HOME" -s /bin/false "$RWHOIS_USER"
+        useradd -r -d "$RWHOIS_HOME" -s /bin/bash "$RWHOIS_USER"
         log "Created user: $RWHOIS_USER"
+    else
+        # Fix existing user if needed
+        usermod -d "$RWHOIS_HOME" -s /bin/bash "$RWHOIS_USER" 2>/dev/null || true
+        log "Updated existing user: $RWHOIS_USER"
     fi
     
     # Create directories
@@ -177,6 +181,12 @@ setup_user_dirs() {
     chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_LOG"
     chmod 755 "$RWHOIS_HOME"
     chmod 755 "$RWHOIS_DATA"
+    
+    # Ensure rwhois user can access its home directory
+    sudo -u "$RWHOIS_USER" test -r "$RWHOIS_HOME" || {
+        error "RWHOIS user cannot access home directory"
+        exit 1
+    }
     
     log "User and directories setup completed"
 }
@@ -781,15 +791,28 @@ start_rwhois() {
         return 1
     fi
     
+    # Check if already running (better detection)
+    if pgrep -f "rwhoisd.*$RWHOIS_CONFIG/rwhoisd.conf" > /dev/null; then
+        warning "RWHOIS server is already running"
+        return 0
+    fi
+    
+    # Validate configuration before starting
+    if [[ ! -f "$RWHOIS_CONFIG/rwhoisd.conf" ]]; then
+        error "Configuration file not found: $RWHOIS_CONFIG/rwhoisd.conf"
+        return 1
+    fi
+    
     # Enhanced systemd detection
     if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
-        if systemctl is-active --quiet rwhois 2>/dev/null; then
-            warning "RWHOIS server is already running"
-            return 0
-        fi
         if systemctl start rwhois 2>/dev/null; then
-            log "RWHOIS server started successfully (systemd)"
-            return 0
+            sleep 2
+            if systemctl is-active --quiet rwhois 2>/dev/null; then
+                log "RWHOIS server started successfully (systemd)"
+                return 0
+            else
+                warning "Systemd start failed, trying manual start..."
+            fi
         else
             warning "Systemd start failed, trying manual start..."
         fi
@@ -797,25 +820,52 @@ start_rwhois() {
     
     # Try init script
     if [ -f /etc/init.d/rwhois ]; then
-        /etc/init.d/rwhois start
-        return $?
+        if /etc/init.d/rwhois start; then
+            sleep 2
+            if pgrep -f "rwhoisd.*$RWHOIS_CONFIG/rwhoisd.conf" > /dev/null; then
+                log "RWHOIS server started successfully (init script)"
+                return 0
+            else
+                warning "Init script start failed, trying manual start..."
+            fi
+        fi
     fi
     
-    # Manual start
-    if pgrep -f rwhoisd > /dev/null; then
-        warning "RWHOIS server is already running"
-        return 0
-    fi
+    # Manual start with better error handling
+    log "Starting RWHOIS server manually..."
     
-    su - "$RWHOIS_USER" -s /bin/bash -c \
-        "$RWHOIS_BIN/rwhoisd -c $RWHOIS_CONFIG/rwhoisd.conf -d" &
+    # Change to the proper directory and start
+    cd "$RWHOIS_HOME"
     
-    sleep 2
-    
-    if pgrep -f rwhoisd > /dev/null; then
-        log "RWHOIS server started successfully (manual)"
+    # Start the server with verbose output for debugging
+    if sudo -u "$RWHOIS_USER" "$RWHOIS_BIN/rwhoisd" -c "$RWHOIS_CONFIG/rwhoisd.conf" -d 2>&1; then
+        log "RWHOIS server started command executed"
     else
-        error "Failed to start RWHOIS server"
+        error "Failed to execute RWHOIS server start command"
+        return 1
+    fi
+    
+    # Wait and verify it's running
+    sleep 3
+    
+    if pgrep -f "rwhoisd.*$RWHOIS_CONFIG/rwhoisd.conf" > /dev/null; then
+        log "RWHOIS server started successfully (manual)"
+        
+        # Verify it's listening on the port
+        if netstat -tlnp 2>/dev/null | grep -q ":$RWHOIS_PORT "; then
+            log "RWHOIS server is listening on port $RWHOIS_PORT"
+        else
+            warning "RWHOIS server may not be listening on port $RWHOIS_PORT"
+        fi
+        
+        return 0
+    else
+        error "Failed to start RWHOIS server - process not found after startup"
+        
+        # Try to get more debugging info
+        log "Attempting to start with verbose output for debugging..."
+        sudo -u "$RWHOIS_USER" "$RWHOIS_BIN/rwhoisd" -c "$RWHOIS_CONFIG/rwhoisd.conf" -d -v || true
+        
         return 1
     fi
 }
@@ -825,9 +875,7 @@ stop_rwhois() {
     
     # Enhanced systemd detection
     if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
-        if ! systemctl is-active --quiet rwhois 2>/dev/null; then
-            warning "RWHOIS server is not running (systemd)"
-        else
+        if systemctl is-active --quiet rwhois 2>/dev/null; then
             if systemctl stop rwhois 2>/dev/null; then
                 log "RWHOIS server stopped (systemd)"
                 return 0
@@ -839,28 +887,47 @@ stop_rwhois() {
     
     # Try init script
     if [ -f /etc/init.d/rwhois ]; then
-        /etc/init.d/rwhois stop
-        return $?
+        if /etc/init.d/rwhois stop 2>/dev/null; then
+            log "RWHOIS server stopped (init script)"
+            return 0
+        fi
     fi
     
-    # Manual stop
-    if ! pgrep -f rwhoisd > /dev/null; then
+    # Manual stop with better process detection
+    local pids=$(pgrep -f "rwhoisd.*$RWHOIS_CONFIG/rwhoisd.conf" 2>/dev/null || true)
+    
+    if [ -z "$pids" ]; then
         warning "RWHOIS server is not running"
         return 0
     fi
     
-    pkill -f rwhoisd
+    log "Stopping RWHOIS processes: $pids"
+    
+    # Try graceful stop first
+    echo "$pids" | xargs -r kill 2>/dev/null || true
     sleep 2
     
-    if pgrep -f rwhoisd > /dev/null; then
-        warning "Force killing RWHOIS server..."
-        pkill -9 -f rwhoisd
+    # Check if still running
+    pids=$(pgrep -f "rwhoisd.*$RWHOIS_CONFIG/rwhoisd.conf" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        warning "Force killing RWHOIS processes: $pids"
+        echo "$pids" | xargs -r kill -9 2>/dev/null || true
+        sleep 1
     fi
     
-    log "RWHOIS server stopped (manual)"
+    # Final verification
+    if pgrep -f "rwhoisd.*$RWHOIS_CONFIG/rwhoisd.conf" > /dev/null; then
+        error "Failed to stop RWHOIS server"
+        return 1
+    else
+        log "RWHOIS server stopped successfully"
+        return 0
+    fi
 }
 
 restart_rwhois() {
+    log "Restarting RWHOIS server..."
+    
     # Enhanced systemd detection
     if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
         if systemctl restart rwhois 2>/dev/null; then
@@ -873,13 +940,15 @@ restart_rwhois() {
     
     # Try init script
     if [ -f /etc/init.d/rwhois ]; then
-        /etc/init.d/rwhois restart
-        return $?
+        if /etc/init.d/rwhois restart 2>/dev/null; then
+            log "RWHOIS server restarted (init script)"
+            return 0
+        fi
     fi
     
     # Manual restart
     stop_rwhois
-    sleep 1
+    sleep 2
     start_rwhois
 }
 
@@ -1032,6 +1101,98 @@ EOF
     fi
 }
 
+# Validate and test RWHOIS installation
+validate_installation() {
+    log "Validating RWHOIS installation..."
+    
+    # Check if server is running
+    if ! pgrep -f "rwhoisd.*$RWHOIS_CONFIG/rwhoisd.conf" > /dev/null; then
+        error "RWHOIS server is not running"
+        return 1
+    fi
+    
+    # Check if listening on port
+    if ! netstat -tlnp 2>/dev/null | grep -q ":$RWHOIS_PORT "; then
+        error "RWHOIS server is not listening on port $RWHOIS_PORT"
+        return 1
+    fi
+    
+    # Test basic connectivity
+    log "Testing RWHOIS connectivity..."
+    if timeout 5 bash -c "echo '-status' | nc localhost $RWHOIS_PORT" >/dev/null 2>&1; then
+        log "RWHOIS server is responding to queries"
+    else
+        warning "RWHOIS server may not be responding properly to queries"
+    fi
+    
+    # Check data object count
+    local object_count=$(timeout 5 bash -c "echo -e '-status\n-quit' | nc localhost $RWHOIS_PORT 2>/dev/null" | grep "objects:" | cut -d: -f2 | tr -d ' ' || echo "0")
+    
+    if [[ "$object_count" =~ ^[0-9]+$ ]] && [[ "$object_count" -gt 0 ]]; then
+        log "RWHOIS server has $object_count data objects loaded"
+    else
+        warning "RWHOIS server has no data objects loaded (objects: $object_count)"
+        warning "You may need to add data and rebuild indexes"
+    fi
+    
+    log "RWHOIS validation completed"
+}
+
+# Create sample data for testing
+create_sample_data() {
+    log "Creating sample data for testing..."
+    
+    local active_data_dir=$(get_data_directory)
+    
+    # Create sample organization
+    mkdir -p "$active_data_dir/org"
+    cat > "$active_data_dir/org/SAMPLE-ORG.txt" << EOF
+name: SAMPLE-ORG
+org-name: Sample Organization
+street-address: 123 Sample Street
+city: Sample City
+state: ST
+postal-code: 12345
+country-code: US
+phone: +1-555-SAMPLE
+e-mail: admin@sample.org
+EOF
+    
+    # Create sample contact
+    mkdir -p "$active_data_dir/contact"
+    cat > "$active_data_dir/contact/SAMPLE-CONTACT.txt" << EOF
+name: SAMPLE-CONTACT
+first-name: John
+last-name: Sample
+organization: Sample Organization
+street-address: 123 Sample Street
+city: Sample City
+state: ST
+postal-code: 12345
+country-code: US
+phone: +1-555-SAMPLE
+e-mail: john@sample.org
+EOF
+    
+    # Create sample network
+    mkdir -p "$active_data_dir/network"
+    cat > "$active_data_dir/network/SAMPLE-NET.txt" << EOF
+name: SAMPLE-NET
+network: 203.0.113.0/24
+net-name: Sample Network
+org-name: Sample Organization
+tech-contact: SAMPLE-CONTACT
+admin-contact: SAMPLE-CONTACT
+created: $(date +%Y-%m-%d)
+updated: $(date +%Y-%m-%d)
+EOF
+    
+    # Set proper ownership
+    chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$active_data_dir"
+    
+    log "Sample data created successfully"
+}
+
 # Display help information
 show_help() {
     cat << EOF
@@ -1043,6 +1204,7 @@ Commands:
     install                     - Full installation of RWHOIS server (includes cleanup)
     reinstall                   - Clean reinstallation (cleanup + install)
     cleanup                     - Remove existing RWHOIS installation
+    validate                    - Validate RWHOIS installation and connectivity
     start                      - Start RWHOIS server
     stop                       - Stop RWHOIS server  
     restart                    - Restart RWHOIS server
@@ -1069,6 +1231,7 @@ Examples:
     $0 install
     $0 reinstall
     $0 cleanup
+    $0 validate
     $0 add-org "ORG-001" "Example Corp" "123 Main St" "City" "ST" "12345" "US" "+1-555-0123" "admin@example.com"
     $0 add-contact "TECH-001" "John" "Doe" "Example Corp" "123 Main St" "City" "ST" "12345" "US" "+1-555-0124" "john@example.com"
     $0 add-network "NET-001" "192.168.1.0/24" "Example Network" "Example Corp" "TECH-001" "ADMIN-001" "ipv4"
@@ -1089,8 +1252,11 @@ main() {
             install_rwhois
             configure_rwhois
             create_systemd_service
+            create_sample_data
             rebuild_indexes
             start_rwhois
+            sleep 3
+            validate_installation
             log "RWHOIS installation completed successfully!"
             
             # Show service management information
@@ -1109,6 +1275,11 @@ main() {
                 info "  - Restart: ./rwhois_automation.sh restart"
             fi
             info "  - Test: telnet localhost 4321"
+            info "  - Query examples:"
+            info "    -status                    (check server status)"
+            info "    -search org-name Sample    (search organizations)"
+            info "    -search contact john       (search contacts)"
+            info "    -search network 203.0.113.0  (search networks)"
             ;;
         "cleanup")
             check_root
@@ -1124,9 +1295,15 @@ main() {
             install_rwhois
             configure_rwhois
             create_systemd_service
+            create_sample_data
             rebuild_indexes
             start_rwhois
+            sleep 3
+            validate_installation
             log "Clean reinstallation completed successfully!"
+            ;;
+        "validate")
+            validate_installation
             ;;
         "start")
             check_root
