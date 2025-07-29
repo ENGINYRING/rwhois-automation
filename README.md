@@ -220,17 +220,22 @@ sudo ./rwhois_automation.sh rebuild-indexes
 
 #### Start/Stop/Restart Service
 ```bash
-# Start RWHOIS server
+# For systemd systems
+systemctl start rwhois
+systemctl stop rwhois
+systemctl restart rwhois
+systemctl status rwhois
+
+# For non-systemd systems (or using the script)
 ./rwhois_automation.sh start
-
-# Stop RWHOIS server
 ./rwhois_automation.sh stop
-
-# Restart RWHOIS server
 ./rwhois_automation.sh restart
 
-# Check service status
-systemctl status rwhois
+# For systems with traditional init scripts
+/etc/init.d/rwhois start
+/etc/init.d/rwhois stop
+/etc/init.d/rwhois restart
+/etc/init.d/rwhois status
 ```
 
 #### Rebuild Indexes
