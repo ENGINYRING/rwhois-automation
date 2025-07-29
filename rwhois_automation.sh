@@ -3,7 +3,7 @@
 # RWHOIS Automation Script
 # Automates installation, configuration, and management of RWHOIS server
 # Author: ENGINYRING
-# Version: 1.0.27
+# Version: 1.0
 # GitHub: https://github.com/ENGINYRING/rwhois-automation
 
 set -e  # Exit on any error
@@ -325,30 +325,76 @@ install_rwhois() {
 configure_rwhois() {
     log "Configuring RWHOIS..."
     
-    # Create main configuration file
-    cat > "$RWHOIS_CONFIG/rwhoisd.conf" << EOF
+    # Use the sample configuration files as a base
+    if [ -d "$RWHOIS_HOME/etc/rwhoisd/samples" ]; then
+        log "Using sample configuration files as base..."
+        
+        # Copy sample configurations to active config directory
+        cp -r "$RWHOIS_HOME/etc/rwhoisd/samples"/* "$RWHOIS_CONFIG/"
+        
+        # Update the main config file with our settings
+        cat > "$RWHOIS_CONFIG/rwhoisd.conf" << EOF
+# RWHOIS Server Configuration - Based on sample
+userid: $RWHOIS_USER
+server-contact: admin@example.com
+pid-file: $RWHOIS_HOME/rwhoisd.pid
+root-dir: $RWHOIS_DATA
+EOF
+
+        # Create the required auth_area file
+        cat > "$RWHOIS_DATA/rwhoisd.auth_area" << EOF
+authority-area: example.com
+hostmaster: admin@example.com
+serial-no: 1
+refresh: 3600
+increment: 1800
+retry: 604800
+ttl: 86400
+primary-server: localhost:$RWHOIS_PORT
+EOF
+
+        # Create the directory file
+        cat > "$RWHOIS_DATA/rwhoisd.dir" << EOF
+type: master
+data-dir: $RWHOIS_DATA
+schema-version: 1.5
+EOF
+
+        # Create rwhoisd.root file
+        cat > "$RWHOIS_DATA/rwhoisd.root" << EOF
+SOA: example.com admin@example.com 1 3600 1800 604800 86400
+authority-area: example.com
+default-ttl: 86400
+EOF
+
+    else
+        log "Sample files not found, creating basic configuration..."
+        
+        # Create basic configuration file
+        cat > "$RWHOIS_CONFIG/rwhoisd.conf" << EOF
 # RWHOIS Server Configuration
 userid: $RWHOIS_USER
 server-contact: admin@example.com
-default-ttl: 86400
-max-hits: 256
-listen: 0.0.0.0:$RWHOIS_PORT
 pid-file: $RWHOIS_HOME/rwhoisd.pid
-register-soa: ON
 root-dir: $RWHOIS_DATA
-schema-version: 1.5
-security-allow: 127.0.0.1/32
-security-allow: 0.0.0.0/0
-default-auth-area: .
-authority-area: example.com
 EOF
 
-    # Create schema files
-    create_schema_files
+        # Create required files
+        cat > "$RWHOIS_DATA/rwhoisd.auth_area" << EOF
+authority-area: example.com
+hostmaster: admin@example.com
+serial-no: 1
+refresh: 3600
+increment: 1800
+retry: 604800
+ttl: 86400
+primary-server: localhost:$RWHOIS_PORT
+EOF
+    fi
     
-    # Create index configuration
+    # Create access control files
     cat > "$RWHOIS_CONFIG/rwhoisd.allow" << EOF
-# RWHOIS Access Control
+# RWHOIS Access Control - Allow all by default
 127.0.0.1/32
 0.0.0.0/0
 EOF
@@ -358,8 +404,12 @@ EOF
 # Add IP addresses or networks to deny access
 EOF
 
+    # Create schema files for our data types
+    create_schema_files
+    
     # Set permissions
     chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_CONFIG"
+    chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_DATA"
     
     log "RWHOIS configuration completed"
 }
