@@ -3,7 +3,7 @@
 # RWHOIS Automation Script
 # Automates installation, configuration, and management of RWHOIS server
 # Author: ENGINYRING
-# Version: 1.0
+# Version: 1.0.27
 # GitHub: https://github.com/ENGINYRING/rwhois-automation
 
 set -e  # Exit on any error
@@ -51,6 +51,79 @@ check_root() {
     fi
 }
 
+# Cleanup existing installation
+cleanup_existing() {
+    log "Cleaning up any existing RWHOIS installation..."
+    
+    # Stop any running services
+    if [ -d /run/systemd/system ] && pidof systemd &> /dev/null && systemctl --version &> /dev/null 2>&1; then
+        if systemctl is-active --quiet rwhois 2>/dev/null; then
+            log "Stopping existing systemd service..."
+            systemctl stop rwhois 2>/dev/null || true
+            systemctl disable rwhois 2>/dev/null || true
+        fi
+        # Remove systemd service file
+        if [ -f /etc/systemd/system/rwhois.service ]; then
+            rm -f /etc/systemd/system/rwhois.service
+            systemctl daemon-reload 2>/dev/null || true
+            log "Removed existing systemd service"
+        fi
+    fi
+    
+    # Stop and remove init script
+    if [ -f /etc/init.d/rwhois ]; then
+        log "Stopping and removing existing init script..."
+        /etc/init.d/rwhois stop 2>/dev/null || true
+        
+        # Remove from startup
+        if command -v update-rc.d &> /dev/null; then
+            update-rc.d rwhois remove 2>/dev/null || true
+        elif command -v chkconfig &> /dev/null; then
+            chkconfig rwhois off 2>/dev/null || true
+            chkconfig --del rwhois 2>/dev/null || true
+        fi
+        
+        rm -f /etc/init.d/rwhois
+        log "Removed existing init script"
+    fi
+    
+    # Kill any running rwhoisd processes
+    if pgrep -f rwhoisd > /dev/null; then
+        log "Stopping running RWHOIS processes..."
+        pkill -f rwhoisd 2>/dev/null || true
+        sleep 2
+        if pgrep -f rwhoisd > /dev/null; then
+            pkill -9 -f rwhoisd 2>/dev/null || true
+        fi
+        log "Stopped running RWHOIS processes"
+    fi
+    
+    # Remove existing installation directory (but preserve data)
+    if [ -d "$RWHOIS_HOME" ]; then
+        log "Backing up existing data and removing old installation..."
+        
+        # Backup existing data if it exists
+        if [ -d "$RWHOIS_DATA" ] && [ "$(ls -A $RWHOIS_DATA 2>/dev/null)" ]; then
+            backup_dir="/tmp/rwhois_backup_$(date +%Y%m%d_%H%M%S)"
+            mkdir -p "$backup_dir"
+            cp -r "$RWHOIS_DATA"/* "$backup_dir/" 2>/dev/null || true
+            log "Backed up existing data to $backup_dir"
+        fi
+        
+        # Remove old installation but preserve the rwhois user
+        rm -rf "$RWHOIS_HOME"
+        log "Removed old installation directory"
+    fi
+    
+    # Clean up lock files
+    rm -f /var/lock/subsys/rwhois /var/lock/rwhois 2>/dev/null || true
+    
+    # Clean up any temp files
+    rm -rf /tmp/rwhois* /tmp/rwhoisd* 2>/dev/null || true
+    
+    log "Cleanup completed"
+}
+
 # Install dependencies
 install_dependencies() {
     log "Installing dependencies..."
@@ -89,6 +162,15 @@ setup_user_dirs() {
     mkdir -p "$RWHOIS_HOME"/{bin,etc,data,log}
     mkdir -p "$RWHOIS_DATA"/{org,contact,network}
     mkdir -p "$RWHOIS_LOG"
+    
+    # Restore backed up data if it exists
+    backup_dir=$(ls -1d /tmp/rwhois_backup_* 2>/dev/null | tail -n1)
+    if [ -n "$backup_dir" ] && [ -d "$backup_dir" ]; then
+        log "Restoring backed up data from $backup_dir"
+        cp -r "$backup_dir"/* "$RWHOIS_DATA/" 2>/dev/null || true
+        rm -rf "$backup_dir"
+        log "Data restored successfully"
+    fi
     
     # Set permissions
     chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$RWHOIS_HOME"
@@ -849,7 +931,9 @@ RWHOIS Automation Script
 Usage: $0 [COMMAND] [OPTIONS]
 
 Commands:
-    install                     - Full installation of RWHOIS server
+    install                     - Full installation of RWHOIS server (includes cleanup)
+    reinstall                   - Clean reinstallation (cleanup + install)
+    cleanup                     - Remove existing RWHOIS installation
     start                      - Start RWHOIS server
     stop                       - Stop RWHOIS server  
     restart                    - Restart RWHOIS server
@@ -874,6 +958,8 @@ Commands:
 
 Examples:
     $0 install
+    $0 reinstall
+    $0 cleanup
     $0 add-org "ORG-001" "Example Corp" "123 Main St" "City" "ST" "12345" "US" "+1-555-0123" "admin@example.com"
     $0 add-contact "TECH-001" "John" "Doe" "Example Corp" "123 Main St" "City" "ST" "12345" "US" "+1-555-0124" "john@example.com"
     $0 add-network "NET-001" "192.168.1.0/24" "Example Network" "Example Corp" "TECH-001" "ADMIN-001" "ipv4"
@@ -888,6 +974,7 @@ main() {
         "install")
             check_root
             log "Starting RWHOIS installation..."
+            cleanup_existing
             install_dependencies
             setup_user_dirs
             install_rwhois
@@ -913,6 +1000,24 @@ main() {
                 info "  - Restart: ./rwhois_automation.sh restart"
             fi
             info "  - Test: telnet localhost 4321"
+            ;;
+        "cleanup")
+            check_root
+            cleanup_existing
+            ;;
+        "reinstall")
+            check_root
+            log "Performing clean reinstallation..."
+            cleanup_existing
+            log "Starting fresh RWHOIS installation..."
+            install_dependencies
+            setup_user_dirs
+            install_rwhois
+            configure_rwhois
+            create_systemd_service
+            rebuild_indexes
+            start_rwhois
+            log "Clean reinstallation completed successfully!"
             ;;
         "start")
             check_root
