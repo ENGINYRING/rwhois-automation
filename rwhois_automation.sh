@@ -376,9 +376,23 @@ EOF
 create_schema_files_in_samples() {
     local samples_dir="$1"
     
-    # Create directories first
-    mkdir -p "$samples_dir"/{org,contact,network}
-    mkdir -p "$samples_dir/network"/{ipv4,ipv6,asn}
+    log "Creating directories in $samples_dir"
+    
+    # Create directories first with explicit logging
+    mkdir -p "$samples_dir/org" && log "Created $samples_dir/org"
+    mkdir -p "$samples_dir/contact" && log "Created $samples_dir/contact" 
+    mkdir -p "$samples_dir/network" && log "Created $samples_dir/network"
+    mkdir -p "$samples_dir/network/ipv4" && log "Created $samples_dir/network/ipv4"
+    mkdir -p "$samples_dir/network/ipv6" && log "Created $samples_dir/network/ipv6"
+    mkdir -p "$samples_dir/network/asn" && log "Created $samples_dir/network/asn"
+    
+    # Verify directories exist before creating schema files
+    if [ ! -d "$samples_dir/org" ]; then
+        error "Failed to create $samples_dir/org directory"
+        return 1
+    fi
+    
+    log "Creating schema files..."
     
     # Create organization schema
     cat > "$samples_dir/org/schema" << EOF
@@ -393,6 +407,8 @@ phone:          Phone Number:           TEXT:40:O:
 fax:            Fax Number:             TEXT:40:O:
 e-mail:         Email Address:          TEXT:80:O:
 EOF
+
+    log "Created organization schema"
 
     # Create contact schema  
     cat > "$samples_dir/contact/schema" << EOF
@@ -411,6 +427,8 @@ fax:            Fax Number:             TEXT:40:O:
 e-mail:         Email Address:          TEXT:80:M:
 EOF
 
+    log "Created contact schema"
+
     # Create network schema
     cat > "$samples_dir/network/schema" << EOF
 name:           Network Name:           TEXT:20:M:
@@ -423,8 +441,11 @@ created:        Created Date:           TEXT:10:O:
 updated:        Updated Date:           TEXT:10:O:
 EOF
 
+    log "Created network schema"
+
     # Set proper ownership
     chown -R "$RWHOIS_USER:$RWHOIS_GROUP" "$samples_dir"/{org,contact,network}
+    log "Set ownership for schema directories"
 }
 
 # Create schema files
