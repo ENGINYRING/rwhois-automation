@@ -105,7 +105,7 @@ install_rwhois() {
     
     cd /tmp
     wget -O rwhois-${RWHOIS_VERSION}.tar.gz \
-        "https://github.com/arineng/rwhoisd/archive/refs/tags/v${RWHOIS_VERSION}.tar.gz" || \
+        "https://github.com/arineng/rwhoisd/archive/refs/tags/${RWHOIS_VERSION}.tar.gz" || \
     wget -O rwhois-${RWHOIS_VERSION}.tar.gz \
         "https://ftp.arin.net/rwhoisd/rwhoisd-${RWHOIS_VERSION}.tar.gz"
     
