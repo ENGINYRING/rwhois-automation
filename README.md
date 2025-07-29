@@ -403,7 +403,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **ENGINYRING**
 
 - GitHub: [@ENGINYRING](https://github.com/ENGINYRING)
-- Email: contact@example.com
+- Email: contact@enginyring.com
 
 ## 🙏 Acknowledgments
 
